@@ -331,3 +331,6 @@ ray_init:
 
   # Path to save Ray timeline JSON for performance profiling
   timeline_json_file: null
+
+  # number of GPU or XPU devices to use for Ray
+  num_gpus: null
