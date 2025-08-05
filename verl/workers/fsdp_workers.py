@@ -252,7 +252,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
 
         # override model kwargs
         actor_model_config = AutoConfig.from_pretrained(
-            local_path, trust_remote_code=trust_remote_code, attn_implementation="flash_attention_2"
+            local_path, trust_remote_code=trust_remote_code, # attn_implementation="flash_attention_2"
         )
 
         # patch for kimi-vl
@@ -564,6 +564,9 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
     def init_model(self):
         from verl.workers.actor import DataParallelPPOActor
 
+        if self.rank == 0:
+            print(f"Initializing {self.role} model with config: {json.dumps(OmegaConf.to_container(self.config), indent=2)}")
+
         # This is used to import external_lib into the huggingface systems
         import_external_libs(self.config.model.get("external_lib", None))
 
@@ -573,6 +576,8 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         use_fused_kernels = self.config.model.get("use_fused_kernels", False)
 
         if self._is_actor or self._is_rollout:
+            if self.rank == 0:
+                print("=========Building actor model and optimizer===========")
             # we need the model for actor and rollout
             if self._is_actor:
                 optim_config = self.config.actor.optim
@@ -601,6 +606,9 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 enable_activation_offload=self.config.model.get("enable_activation_offload", False),
             )
 
+            if self.rank == 0:
+                print("=======Actor model and optimizer initialized successfully=========")
+
             # get the original unwrapped module
             if fsdp_version(self.actor_module_fsdp) == 1:
                 self.actor_module = self.actor_module_fsdp._fsdp_wrapped_module
@@ -620,11 +628,17 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             )
 
         if self._is_rollout:
+            if self.rank == 0:
+                print("=========Building rollout===========")
             self.rollout, self.rollout_sharding_manager = self._build_rollout(
                 trust_remote_code=self.config.model.get("trust_remote_code", False)
             )
+            if self.rank == 0:
+                print("=======Rollout initialized successfully=========")
 
         if self._is_ref:
+            if self.rank == 0:
+                print("=========Init fsdp module for reference policy===========")
             local_path = copy_to_local(self.config.model.path, use_shm=use_shm)
             self.ref_module_fsdp = self._build_model_optimizer(
                 model_path=local_path,
@@ -637,6 +651,8 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 use_liger=self.config.model.get("use_liger", False),
                 role="ref",
             )[0]
+            if self.rank == 0:
+                print("=======Reference policy model initialized successfully=========")
             OmegaConf.set_struct(self.config.ref, True)
             with open_dict(self.config.ref):
                 self.config.ref.use_remove_padding = use_remove_padding
@@ -1008,7 +1024,7 @@ class CriticWorker(Worker, DistProfilerExtension):
 
         critic_model_config = AutoConfig.from_pretrained(
             local_path,
-            attn_implementation="flash_attention_2",
+            # attn_implementation="flash_attention_2",
             trust_remote_code=config.model.get("trust_remote_code", False),
         )
         critic_model_config.num_labels = 1
@@ -1376,7 +1392,7 @@ class RewardModelWorker(Worker, DistProfilerExtension):
                 pretrained_model_name_or_path=local_path,
                 config=model_config,
                 torch_dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
+                # attn_implementation="flash_attention_2",
                 trust_remote_code=trust_remote_code,
             )
 
@@ -1428,15 +1444,16 @@ class RewardModelWorker(Worker, DistProfilerExtension):
         self.reward_module = self._build_model(config=self.config)
 
     def _forward_micro_batch(self, micro_batch):
-        if is_cuda_available:
-            from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
-        elif is_npu_available:
-            from transformers.integrations.npu_flash_attention import (
-                index_first_axis,
-                pad_input,
-                rearrange,
-                unpad_input,
-            )
+        # if is_cuda_available:
+        #     from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
+        # elif is_npu_available:
+        #     from transformers.integrations.npu_flash_attention import (
+        #         index_first_axis,
+        #         pad_input,
+        #         rearrange,
+        #         unpad_input,
+        #     )
+        from verl.workers.actor.utils import index_first_axis, pad_input, rearrange, unpad_input
 
         from verl.utils.ulysses import gather_outputs_and_unpad, ulysses_pad_and_slice_inputs
 
